@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>地理統計クイズ - 10問限定</title>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #f4f7f6; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: 480px; text-align: center; }
+        #q-text { font-size: 1.4em; color: #2c3e50; margin: 20px 0; }
+        .choice-btn { display: block; width: 100%; padding: 12px; margin: 10px 0; cursor: pointer; border: 2px solid #e0e6ed; border-radius: 8px; background: white; font-size: 16px; }
+        .choice-btn:hover:not(:disabled) { border-color: #007bff; background: #f0f7ff; }
+        .choice-btn:disabled { cursor: default; opacity: 0.7; }
+        #feedback { font-weight: bold; font-size: 1.2em; margin-top: 15px; }
+        #global-stats { font-size: 0.85em; color: #5a67d8; background: #ebf4ff; padding: 8px; border-radius: 6px; }
+        .primary-btn { padding: 15px 30px; font-size: 1.1em; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 6px; width: 100%; margin-top: 20px; }
+        #progress { font-size: 0.9em; color: #999; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+    <!-- 1. スタート画面 -->
+    <div id="start-screen" class="card">
+        <h1>地理統計クイズ</h1>
+        <p>全10問のランダムクイズに挑戦！</p>
+        <button class="primary-btn" onclick="startQuiz()">クイズを開始する</button>
+    </div>
+
+    <!-- 2. クイズ画面 -->
+    <div id="quiz-card" class="card" style="display: none;">
+        <div id="progress">第 1 / 10 問</div>
+        <div id="global-stats">読み込み中...</div>
+        <div id="q-text"></div>
+        <div id="choices"></div>
+        <p id="feedback"></p>
+        <button id="next-btn" class="primary-btn" onclick="goToNextQuestion()" style="display: none; background: #28a745;">次の問題へ</button>
+    </div>
+
+    <!-- 3. リザルト画面 -->
+    <div id="result-screen" class="card" style="display: none;">
+        <h1>クイズ終了！</h1>
+        <p id="final-score" style="font-size: 1.5em; margin: 20px 0;"></p>
+        <button class="primary-btn" onclick="location.reload()">もう一度挑戦する</button>
+    </div>
+
+<script>
+const API_URL = "http://localhost:8000";
+
+// 問題を大量に用意（10問以上推奨）
+const allQuestions = [
+    { id: "q_copper", text: "チリで多く産出される鉱産資源は？", choices: ["鉄鉱石", "銅", "ボーキサイト", "石炭"], answer: "銅" },
+    { id: "q_corn", text: "世界1位のトウモロコシ生産国は？", choices: ["中国", "アメリカ", "ブラジル", "日本"], answer: "アメリカ" },
+    { id: "q_bauxite", text: "ボーキサイトの生産が世界1位の国は？", choices: ["オーストラリア", "サウジアラビア", "ドイツ", "英国"], answer: "オーストラリア" },
+    { id: "q_shale", text: "原油の生産量が世界1位の国は？", choices: ["ロシア", "サウジアラビア", "アメリカ", "カナダ"], answer: "アメリカ" },
+    { id: "q_coffee", text: "コーヒー豆の生産1位は？", choices: ["ブラジル", "ベトナム", "コロンビア", "インドネシア"], answer: "ブラジル" },
+    { id: "q_tea", text: "茶の生産量が世界1位の国は？", choices: ["インド", "スリランカ", "中国", "ケニア"], answer: "中国" },
+    { id: "q_wheat", text: "小麦の生産量が世界1位の国は？", choices: ["アメリカ", "中国", "インド", "ロシア"], answer: "中国" },
+    { id: "q_iron", text: "鉄鉱石の生産量が世界1位の国は？", choices: ["オーストラリア", "ブラジル", "中国", "インド"], answer: "オーストラリア" },
+    { id: "q_rice", text: "米の生産量が世界1位の国は？", choices: ["タイ", "ベトナム", "中国", "インド"], answer: "中国" },
+    { id: "q_silver", text: "銀の生産量が世界1位の国は？", choices: ["メキシコ", "ペルー", "中国", "ボリビア"], answer: "メキシコ" }
+];
+
+let quizDeck = []; // 今回解く問題の山札
+let currentIndex = 0;
+let score = 0;
+const MAX_QUESTIONS = 10;
+
+// シャッフル関数
+function shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+}
+
+function startQuiz() {
+    // 問題をコピーしてシャッフルし、10問だけ抽出
+    quizDeck = shuffle([...allQuestions]).slice(0, MAX_QUESTIONS);
+    currentIndex = 0;
+    score = 0;
+    
+    document.getElementById("start-screen").style.display = "none";
+    document.getElementById("quiz-card").style.display = "block";
+    displayQuestion();
+}
+
+async function loadStats(qId) {
+    try {
+        const res = await fetch(`${API_URL}/stats/${qId}`);
+        const data = await res.json();
+        document.getElementById("global-stats").innerText = `全国正答率: ${data.rate}%`;
+    } catch (e) {
+        document.getElementById("global-stats").innerText = "統計なし";
+    }
+}
+
+function displayQuestion() {
+    const q = quizDeck[currentIndex];
+    document.getElementById("progress").innerText = `第 ${currentIndex + 1} / ${MAX_QUESTIONS} 問`;
+    document.getElementById("q-text").innerText = q.text;
+    document.getElementById("feedback").innerText = "";
+    document.getElementById("next-btn").style.display = "none";
+    
+    loadStats(q.id);
+
+    const container = document.getElementById("choices");
+    container.innerHTML = "";
+    
+    // 選択肢もシャッフル
+    shuffle([...q.choices]).forEach(c => {
+        const btn = document.createElement("button");
+        btn.innerText = c;
+        btn.className = "choice-btn";
+        btn.onclick = () => handleAnswer(c, btn);
+        container.appendChild(btn);
+    });
+}
+
+async function handleAnswer(selected, btn) {
+    const q = quizDeck[currentIndex];
+    const isCorrect = (selected === q.answer);
+    
+    if (isCorrect) score++;
+    
+    document.getElementById("feedback").innerText = isCorrect ? "正解！" : `不正解... 正解は「${q.answer}」`;
+    document.getElementById("feedback").style.color = isCorrect ? "#28a745" : "#dc3545";
+
+    document.querySelectorAll(".choice-btn").forEach(b => b.disabled = true);
+    
+    // 統計送信
+    fetch(`${API_URL}/update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question_id: q.id, is_correct: isCorrect })
+    }).catch(e => console.error("Stats update failed"));
+
+    document.getElementById("next-btn").style.display = "block";
+    if (currentIndex === MAX_QUESTIONS - 1) {
+        document.getElementById("next-btn").innerText = "結果を見る";
+    }
+}
+
+function goToNextQuestion() {
+    currentIndex++;
+    if (currentIndex < MAX_QUESTIONS) {
+        displayQuestion();
+    } else {
+        showResult();
+    }
+}
+
+function showResult() {
+    document.getElementById("quiz-card").style.display = "none";
+    document.getElementById("result-screen").style.display = "block";
+    document.getElementById("final-score").innerText = `${MAX_QUESTIONS}問中 ${score}問 正解！`;
+}
+</script>
+</body>
+</html>
